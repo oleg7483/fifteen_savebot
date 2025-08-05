@@ -1,79 +1,49 @@
-from fastapi import FastAPI, Request
 from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    ContextTypes,
-    CommandHandler,
-    MessageHandler,
-    filters,
-)
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import os
 
-# Получаем токен и URL вебхука из переменных окружения
+# Получаем токен из переменной окружения (безопасно!)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Например: https://fifteen-savebot.onrender.com
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN не установлен! Добавьте его в переменные окружения Render.")
 
-# Создаём FastAPI приложение
-app = FastAPI()
-
-# Создаём экземпляр Application (вместо старого Updater)
-telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-
+# Обработчик /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /start"""
     await update.message.reply_text(
-        "👋 Привет! Отправь сумму поступления, а я рассчитаю, сколько отложить по твоей схеме."
+        "Привет! Я помогу посчитать, сколько отложить.\n"
+        "Введите сумму поступления (в грн):"
     )
 
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик текстовых сообщений (не команд)"""
+# Обработчик суммы
+async def handle_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        amount = float(update.message.text.replace(",", "."))
-        to_save, remaining = calculate_savings(amount)
-        await update.message.reply_text(
-            f"💰 Поступило: {amount} грн\n"
-            f"📌 Откладываем: {to_save} грн\n"
-            f"🪙 Остаток: {remaining} грн"
-        )
+        amount = float(update.message.text.replace(',', '.'))
     except ValueError:
-        await update.message.reply_text("❌ Введи сумму числом, например: 1500 или 3000.50")
+        await update.message.reply_text("❌ Пожалуйста, введите число (например: 1500 или 2500.50).")
+        return
 
-
-def calculate_savings(amount: float):
-    """Логика расчёта суммы для откладывания"""
     if amount <= 2000:
-        to_save = round(amount * 0.15, 2)
+        savings = amount * 0.15
+        percent = 15
     else:
-        to_save = round(amount * 0.10, 2)
-    remaining = round(amount - to_save, 2)
-    return to_save, remaining
+        savings = amount * 0.10
+        percent = 10
 
+    await update.message.reply_text(
+        f"📊 Сумма: {amount:.2f} грн\n"
+        f"💰 Отложить {percent}% → {savings:.2f} грн"
+    )
 
-# Добавляем обработчики
-telegram_app.add_handler(CommandHandler("start", start))
-telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+# Основная функция
+def main():
+    print("🚀 Запуск Telegram-бота...")
+    app = Application.builder().token(BOT_TOKEN).build()
 
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_amount))
 
-@app.on_event("startup")
-async def startup():
-    """Устанавливаем вебхук при запуске приложения"""
-    webhook_url = f"{WEBHOOK_URL}/webhook"
-    await telegram_app.bot.set_webhook(url=webhook_url)
-    print(f"✅ Вебхук установлен: {webhook_url}")
+    print("✅ Бот запущен и слушает сообщения...")
+    app.run_polling()
 
-
-@app.post("/webhook")
-async def webhook_handler(request: Request):
-    """Получаем обновления от Telegram"""
-    data = await request.json()
-    update = Update.de_json(data, telegram_app.bot)
-    await telegram_app.process_update(update)
-    return {"status": "ok"}
-
-
-@app.get("/")
-def root():
-    """Простой эндпоинт для проверки работы сервиса"""
-    return {"status": "Бот работает"}
+if __name__ == '__main__':
+    main()
